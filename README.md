@@ -44,3 +44,8 @@ usage: hash_extractor.py [-h] [--version] [-n username] [-u path] [--hashcat] [-
 The tool should not extract any hashes from your Domino Directory in a perfect world.
 
 If it can extract hashes, read the Domino documentation and implement a safe configuration.
+
+# Requirements
+
+You need a valid username and password to access the Domino server. This tool can not be used to gain access to a Domino server without valid credentials.
+
