@@ -23,6 +23,9 @@ https://help.hcltechsw.com/domino/14.0.0/admin/conf_totp_overview.html
 
 With Domino you can also use Passkey authentication
 
+https://help.hcltechsw.com/domino/14.0.0/admin/conf_dominopasskeyauth.html
+
+
 # INSTALLATION
 
 You may need to install these libraries for a local python3 installation:
