@@ -34,3 +34,9 @@ You may need to install these libraries for a local python3 installation:
 pip3 install request
 pip3 install beautifulsoup4
 ```
+
+# Usage
+
+```
+usage: hash_extractor.py [-h] [--version] [-n username] [-u path] [--hashcat] [--john] [-f outputPath] [-c CSV file with many information about the user. Defaults to <system>.csv] system
+```
