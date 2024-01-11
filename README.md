@@ -27,8 +27,7 @@ With Domino you can also use Passkey authentication
 
 You may need to install these libraries for a local python3 installation:
 
-'''
+```
 pip3 install request
-
 pip3 install beautifulsoup4
-'''
+```
