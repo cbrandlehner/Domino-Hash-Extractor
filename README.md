@@ -38,7 +38,7 @@ pip3 install beautifulsoup4
 # Usage
 
 ```
-usage: hash_extractor.py [-h] [--version] [-n username] [-u path] [--hashcat] [--john] [-f outputPath] [-c CSV file with many information about the user. Defaults to <system>.csv] system
+usage: hash_extractor.py [-h] [--version] [-n username] [-u path if not /names.nsf] [--hashcat file format] [--john file format] [-f file with found hashes] [-c CSV file] system
 ```
 
 The tool should not extract any hashes from your Domino Directory in a perfect world.
