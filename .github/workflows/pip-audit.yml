@@ -1,22 +1,39 @@
 name: pip-audit
 
-on: schedule
+on:
+  schedule:
+    - cron: '0 3 * * 1'          # ← example: every Monday at 03:00 UTC — change as needed
+  workflow_dispatch:             # ← this enables manual triggering
 
 permissions:
   contents: read
-  issues: write
-  models: read
+  issues: write                # useful if you want pip-audit to create issues on findings
 
 jobs:
   selftest:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - name: install
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'   # ← adjust if your project needs a different version
+          cache: 'pip'
+
+      - name: Create virtual environment and install project
         run: |
           python -m venv env/
           source env/bin/activate
+          python -m pip install --upgrade pip
           python -m pip install .
-      - uses: pypa/gh-action-pip-audit@v1.1.0
+
+      - name: Run pip-audit
+        uses: pypa/gh-action-pip-audit@v1.1.0
         with:
           virtual-environment: env/
+          # Optional extras you might want to add:
+          # fail-on: high             # fail the job on high or critical vulnerabilities
+          # output: pip-audit-report.txt
+          # loglevel: debug
