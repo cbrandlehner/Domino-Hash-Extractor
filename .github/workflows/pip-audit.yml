@@ -1,0 +1,29 @@
+name: gh-action-pip-audit
+  # You may pin to the exact commit or the version.
+  # uses: pypa/gh-action-pip-audit@d499194be74aeb3bc7dbed3a224a87e1831132c7
+  uses: pypa/gh-action-pip-audit@v1.0.8
+  with:
+    # render a Markdown summary of the audit (default true)
+    summary: # optional, default is true
+    # don't do any dependency resolution (requires fully pinned requirements) (default false)
+    no-deps: # optional
+    # enforce hashes (requirements-style inputs only) (default false)
+    require-hashes: # optional
+    # the vulnerability service to use (PyPI or OSV, defaults to PyPI)
+    vulnerability-service: # optional, default is PyPI
+    # the inputs to audit, whitespace separated (defaults to current path)
+    inputs: # optional, default is 
+    # the virtual environment to audit within (default none)
+    virtual-environment: # optional, default is 
+    # for environmental audits, consider only packages marked local (default false)
+    local: # optional
+    # the base URL for the PEP 503-compatible package index to use
+    index-url: # optional, default is 
+    # extra PEP 503-compatible indexes to use, whitespace separated
+    extra-index-urls: # optional, default is 
+    # vulnerabilities to explicitly exclude, if present (whitespace separated)
+    ignore-vulns: # optional, default is 
+    # don't fail the job if the audit fails (default false)
+    internal-be-careful-allow-failure: # optional
+    # extra flags to be passed in to pip-audit
+    internal-be-careful-extra-flags: # optional, default is 
