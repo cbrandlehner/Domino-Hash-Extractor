@@ -31,7 +31,7 @@ https://help.hcltechsw.com/domino/14.0.0/admin/conf_dominopasskeyauth.html
 You may need to install these libraries for a local python3 installation:
 
 ```
-pip3 install request
+pip3 install requests
 pip3 install beautifulsoup4
 ```
 
