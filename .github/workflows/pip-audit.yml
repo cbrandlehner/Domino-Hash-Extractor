@@ -2,15 +2,15 @@ name: pip-audit
 
 on:
   schedule:
-    - cron: '0 3 * * 1'          # ← example: every Monday at 03:00 UTC — change as needed
-  workflow_dispatch:             # ← this enables manual triggering
+    - cron: '0 3 * * 1'          # every Monday at 03:00 UTC — change this interval if needed
+  workflow_dispatch:             # allows manual run from Actions tab
 
 permissions:
   contents: read
-  issues: write                # useful if you want pip-audit to create issues on findings
+  issues: write                  # lets pip-audit create issues if you enable that feature
 
 jobs:
-  selftest:
+  audit:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,21 +19,31 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'   # ← adjust if your project needs a different version
+          python-version: '3.12'   # matches your earlier run; change if needed
           cache: 'pip'
 
-      - name: Create virtual environment and install project
+      - name: Create virtual environment and install dependencies
         run: |
           python -m venv env/
           source env/bin/activate
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
 
       - name: Run pip-audit
         uses: pypa/gh-action-pip-audit@v1.1.0
         with:
           virtual-environment: env/
-          # Optional extras you might want to add:
-          # fail-on: high             # fail the job on high or critical vulnerabilities
-          # output: pip-audit-report.txt
-          # loglevel: debug
+          # Optional: make the job fail if vulnerabilities are found
+          # fail-on: any           # or 'high' / 'critical'
+          # output: pip-audit-report.txt   # save report (you can upload as artifact below)
+
+      # Optional: upload report even if audit finds issues (useful for review)
+      - name: Upload pip-audit report (if generated)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: |
+            pip-audit-report.*
+            *.txt
+          if-no-files-found: ignore
